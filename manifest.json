@@ -1,0 +1,13 @@
+{
+  "name": "Set Code Syntax",
+  "id": "1641254600210827699",
+  "api": "1.0.0",
+  "main": "code.js",
+  "editorType": ["figma"],
+  "permissions": ["currentuser"],
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "reasoning": "The plugin runs fully offline. All assets (the author photo) are embedded inline as data URIs; no external requests are made."
+  },
+  "documentAccess": "dynamic-page"
+}
