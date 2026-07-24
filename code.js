@@ -136,12 +136,20 @@ const htmlUI = `<!DOCTYPE html>
     color:var(--ink-400);background:var(--paper);transition:.2s;
   }
   .step.active .step-dot{background:var(--orange);border-color:var(--orange);color:#fff;box-shadow:0 4px 10px -3px rgba(251,70,20,.45);}
-  .step.done .step-dot{background:var(--surface-2);border-color:var(--line-2);color:var(--ink-700);}
+  .step.done .step-dot{background:var(--ink-900);border-color:var(--ink-900);color:var(--paper);}
   .step-name{font-size:12px;font-weight:600;color:var(--ink-400);transition:.2s;white-space:nowrap;}
   .step.active .step-name{color:var(--ink-900);}
   .step.done .step-name{color:var(--ink-700);}
-  .step-bar{flex:1;height:1.5px;background:var(--line-2);margin:0 9px;border-radius:2px;transition:.25s;}
-  .step-bar.filled{background:var(--ink-300);}
+  .step-bar{
+    --progress:0%;flex:1;height:2px;margin:0 9px;border-radius:999px;overflow:hidden;
+    background:linear-gradient(90deg,var(--orange) 0 var(--progress),var(--line-2) var(--progress) 100%);
+    transition:background-color .22s ease;
+  }
+  .step-bar.completed{background:var(--ink-900);}
+  .step-spinner{width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,.42);
+    border-top-color:#fff;animation:stepSpin .72s linear infinite;}
+  @keyframes stepSpin{to{transform:rotate(360deg);}}
+  .step-check{display:block;}
 
   /* ── Scroll body ── */
   .body{flex:1;overflow-y:auto;padding:14px 18px 18px;display:flex;flex-direction:column;gap:22px;}
@@ -258,6 +266,9 @@ const htmlUI = `<!DOCTYPE html>
   .ov-head{padding:16px 18px 14px;border-bottom:1px solid var(--line);flex-shrink:0;}
   .ov-head h2{font-size:16px;font-weight:700;letter-spacing:-.02em;}
   .ov-head p{font-size:12.5px;color:var(--ink-500);margin-top:2px;}
+  .apply-title-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;}
+  .apply-percent{font-size:12px;font-weight:600;color:var(--ink-500);font-variant-numeric:tabular-nums;
+    min-width:34px;text-align:right;}
   /* preview header never carries a divider — the tab underline (when present) is the only separator */
   #previewOv .ov-head{border-bottom:none;padding-bottom:6px;}
   /* animated "Applying" loader — three compositor-friendly dots that stay smooth even while
@@ -652,7 +663,10 @@ const htmlUI = `<!DOCTYPE html>
 
   <!-- ── Log overlay ── -->
   <div class="overlay" id="logOv">
-    <div class="ov-head"><h2 id="logTitle">Applying…</h2><p id="logSub">Writing code syntax to your variables</p></div>
+    <div class="ov-head">
+      <div class="apply-title-row"><h2 id="logTitle">Applying…</h2><span class="apply-percent" id="applyPercent"></span></div>
+      <p id="logSub">Preparing selected variables…</p>
+    </div>
     <div class="log-list" id="logList"></div>
     <div class="done-msg" id="doneMsg"></div>
   </div>
@@ -897,14 +911,63 @@ const htmlUI = `<!DOCTYPE html>
   });
 
   /* ── Step indicator + button state machine ── */
+  var previewLoading = false;
+  var previewProgress = 0;
+  var previewTimer = null;
+  var applyFinished = false;
+  var applyProgress = 0;
+  var applyTotal = 0;
+  var applyProcessed = 0;
+  var applyPrepTimer = null;
+  var STEP_CHECK = '<svg class="step-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+  function setBarProgress(id, value){
+    var bar = $(id);
+    bar.className = 'step-bar';
+    bar.style.setProperty('--progress', Math.max(0, Math.min(100, value)) + '%');
+  }
+  function completeBar(id){
+    var bar = $(id);
+    bar.className = 'step-bar completed';
+    bar.style.setProperty('--progress', '100%');
+  }
+  function resetBar(id){
+    var bar = $(id);
+    bar.className = 'step-bar';
+    bar.style.setProperty('--progress', '0%');
+  }
+  function setApplyProgress(value){
+    applyProgress = Math.max(0, Math.min(100, value));
+    setBarProgress('bar2', applyProgress);
+    var pct = $('applyPercent');
+    if(pct) pct.textContent = applyProgress >= 12 ? Math.round(applyProgress) + '%' : '';
+  }
   function setSteps(active){
     var map = { main:1, preview:2, log:3 }, n = map[active];
-    document.querySelectorAll('.step').forEach(function(s){
-      var i = +s.dataset.step;
-      s.className = 'step' + (i < n ? ' done' : i === n ? ' active' : '');
+    document.querySelectorAll('.step').forEach(function(stepEl){
+      var i = +stepEl.dataset.step;
+      var dot = stepEl.querySelector('.step-dot');
+      if(i < n || (i === 3 && active === 'log' && applyFinished)){
+        stepEl.className = 'step done';
+        dot.innerHTML = STEP_CHECK;
+      } else if(i === n){
+        stepEl.className = 'step active';
+        dot.innerHTML = (active === 'log' && !applyFinished) ? '<span class="step-spinner"></span>' : String(i);
+      } else {
+        stepEl.className = 'step';
+        dot.textContent = String(i);
+      }
     });
-    $('bar1').className = 'step-bar' + (n > 1 ? ' filled' : '');
-    $('bar2').className = 'step-bar' + (n > 2 ? ' filled' : '');
+
+    if(active === 'main'){
+      if(previewLoading) setBarProgress('bar1', previewProgress); else resetBar('bar1');
+      resetBar('bar2');
+    } else {
+      completeBar('bar1');
+      if(active === 'log'){
+        if(applyFinished) completeBar('bar2'); else setBarProgress('bar2', applyProgress);
+      } else resetBar('bar2');
+    }
   }
   function setStep(s){
     step = s; setSteps(s);
@@ -1002,6 +1065,13 @@ const htmlUI = `<!DOCTYPE html>
   /* ── Preview (round-trips to the backend) ── */
   function requestPreview(){
     btnLabel.textContent = 'Loading\u2026'; btnIcon.style.display = 'none'; btnMain.disabled = true;
+    previewLoading = true; previewProgress = 4;
+    clearInterval(previewTimer);
+    setSteps('main');
+    previewTimer = setInterval(function(){
+      previewProgress = Math.min(90, previewProgress + (previewProgress < 30 ? 3 : 1));
+      setBarProgress('bar1', previewProgress);
+    }, 120);
     parent.postMessage({ pluginMessage: {
       type: 'preview',
       selectedIds: Array.from(selected),
@@ -1192,6 +1262,8 @@ const htmlUI = `<!DOCTYPE html>
   }
 
   function renderPreview(items){
+    clearInterval(previewTimer); previewTimer = null;
+    previewLoading = false; previewProgress = 100;
     lastPreviewItems = items || [];
     boolOverrides = {};
     openBoolId = null;
@@ -1218,9 +1290,16 @@ const htmlUI = `<!DOCTYPE html>
     return logGroups[col];
   }
   function runApply(){
+    applyFinished = false; applyTotal = 0; applyProcessed = 0; applyProgress = 4;
+    clearInterval(applyPrepTimer);
     setStep('log');
+    setApplyProgress(4);
+    applyPrepTimer = setInterval(function(){
+      if(applyTotal > 0) return;
+      setApplyProgress(Math.min(12, applyProgress + 1));
+    }, 180);
     $('logTitle').innerHTML = 'Applying<span class="dots"><i></i><i></i><i></i></span>';
-    $('logSub').textContent = 'Writing code syntax to your variables';
+    $('logSub').textContent = 'Preparing selected variables…';
     $('doneMsg').className = 'done-msg';
     $('logList').innerHTML = ''; logGroups = {}; logCounts = {};
     parent.postMessage({ pluginMessage: {
@@ -1262,8 +1341,25 @@ const htmlUI = `<!DOCTYPE html>
     });
     var ll = $('logList'); ll.scrollTop = ll.scrollHeight;
   }
+  function startApplyProgress(total){
+    applyTotal = Math.max(0, total || 0);
+    clearInterval(applyPrepTimer); applyPrepTimer = null;
+    setApplyProgress(Math.max(12, applyProgress));
+    $('logSub').textContent = applyTotal
+      ? 'Updating 0 of ' + applyTotal + ' variables'
+      : 'Writing code syntax to your variables';
+  }
+  function updateApplyProgress(processed, total){
+    applyTotal = Math.max(0, total || applyTotal);
+    applyProcessed = Math.max(0, processed || 0);
+    var real = applyTotal ? 12 + (applyProcessed / applyTotal) * 86 : applyProgress;
+    setApplyProgress(Math.min(98, real));
+    if(applyTotal) $('logSub').textContent = 'Updating ' + Math.min(applyProcessed, applyTotal) + ' of ' + applyTotal + ' variables';
+  }
   function finishApply(d){
     d = d || {};
+    clearInterval(applyPrepTimer); applyPrepTimer = null;
+    setApplyProgress(100);
     var setN = d.set || 0, updated = d.updated || 0, alreadySet = d.alreadySet || 0, failed = d.failed || 0, skipped = d.skipped || 0;
     var nothing = !setN && !updated && !alreadySet && !failed;
     $('logTitle').textContent = 'Done';
@@ -1280,6 +1376,8 @@ const htmlUI = `<!DOCTYPE html>
     dm.innerHTML = '<span class="done-ic">' + (warn ? DONEWARN : DONEOK) + '</span><span>' +
       (nothing ? 'Nothing to apply \u2014 check your selections' : parts.join(' \u00b7 ')) + '</span>';
     btnLabel.textContent = 'Close'; btnIcon.style.display = 'none'; btnMain.disabled = false;
+    // Keep 100% orange for a brief confirmation beat, then mark the stage completed in black.
+    setTimeout(function(){ applyFinished = true; setSteps('log'); }, 220);
     // once applying is done, return the list to the top (same as the Preview screen)
     $('logList').scrollTop = 0;
   }
@@ -1295,6 +1393,8 @@ const htmlUI = `<!DOCTYPE html>
     var msg = e.data && e.data.pluginMessage; if(!msg) return;
     if(msg.type === 'collections')   renderCollections(msg.data);
     else if(msg.type === 'preview')  renderPreview(msg.data);
+    else if(msg.type === 'runStart') startApplyProgress(msg.total);
+    else if(msg.type === 'progress') updateApplyProgress(msg.processed, msg.total);
     else if(msg.type === 'logBatch') appendLogBatch(msg.items);
     else if(msg.type === 'log')      appendLogBatch([msg]);
     else if(msg.type === 'done')     finishApply(msg);
@@ -1470,8 +1570,12 @@ function selectionKey(selectedIds, types) {
       // whole loop would block and the progress log + loader would appear frozen.
       let logBatch = [];
       let processed = 0;
-      const LOG_BATCH = 200;
-      const flushLogs = () => { if (logBatch.length) { figma.ui.postMessage({ type: "logBatch", items: logBatch }); logBatch = []; } };
+      const LOG_BATCH = 25;
+      let totalToProcess = 0;
+      const flushLogs = () => {
+        if (logBatch.length) { figma.ui.postMessage({ type: "logBatch", items: logBatch }); logBatch = []; }
+        if (totalToProcess) figma.ui.postMessage({ type: "progress", processed, total: totalToProcess });
+      };
 
       let vars = [];
       try {
@@ -1484,6 +1588,9 @@ function selectionKey(selectedIds, types) {
         figma.notify("Error loading variables: " + e.message, { error: true });
         return;
       }
+
+      totalToProcess = vars.length;
+      figma.ui.postMessage({ type: "runStart", total: totalToProcess });
 
       for (const { v, colName } of vars) {
         if (processed > 0 && processed % LOG_BATCH === 0) { flushLogs(); await new Promise(r => setTimeout(r, 0)); }
