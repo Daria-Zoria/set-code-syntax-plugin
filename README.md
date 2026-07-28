@@ -1,11 +1,12 @@
-<img width="5760" height="3240" alt="plugin-сover-new" src="https://github.com/user-attachments/assets/d50e7df2-5da7-4b6e-b952-dbd48997f3f9" />
+<img width="5760" height="3240" alt="Plugin Cover" src="https://github.com/user-attachments/assets/a4fcaef7-3845-40b9-bacb-54f1dc9d1718" />
+
 
 # Set Code Syntax
 Generate platform-specific Code Syntax for Figma Variables across Web, Android and iOS.
 
 A Figma plugin that helps design-system teams create, review and apply consistent Code Syntax without editing every variable manually.
 
-https://github.com/user-attachments/assets/c4c4b390-1221-474f-bad9-57138718c850
+https://github.com/user-attachments/assets/1206ca96-0936-4da2-b2d0-f68748562e32
 
 <br>
 
